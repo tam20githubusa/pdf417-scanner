@@ -1,9 +1,7 @@
-# requirements.txt 内容
+# requirements.txt
 streamlit
 numpy
 pandas
-
-# 复杂的图像/视频处理依赖
 opencv-python
 zxing-cpp
 streamlit-webrtc
