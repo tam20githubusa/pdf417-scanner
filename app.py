@@ -139,18 +139,16 @@ def smart_scan_logic(original_img):
         progress_bar.empty()
     return found_result
 
-# --- 新增：PDF417 参数逆向计算 ---
+# --- PDF417 参数逆向计算 ---
 
 def calculate_pdf417_params(byte_len):
     """
     根据字节长度，计算所有可能的 PDF417 行列组合，并估算宽高比。
-    
     """
     if byte_len <= 0:
         return pd.DataFrame()
 
     # AAMVA 标准估算逻辑 (北美驾照/ID标准)
-    # 1.8 bytes ≈ 1 data codeword (混合模式平均值)
     estimated_data_cw = math.ceil(byte_len / 1.8) 
     ecc_cw = 64  # Level 5 Security (AAMVA Standard)
     total_cw = estimated_data_cw + ecc_cw
@@ -165,8 +163,6 @@ def calculate_pdf417_params(byte_len):
             continue
             
         # 宽高比估算 (W/H)，假设行高/模块宽度 = 3 (常见于ID卡)
-        # 宽度模块数: (Cols + 4) * 17
-        # 高度模块数: Rows * 3
         width_units = (cols + 4) * 17
         height_units = rows * 3 
         ratio = width_units / height_units
@@ -215,7 +211,7 @@ with tab2:
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
             <h4 style="margin: 0; color: #2e7d32; font-size: 1.1rem;">🚀 最佳识别方案：</h4>
             <p style="margin: 10px 0 0 0; font-size: 1rem; color: #333;">
-                点击下方按钮，在弹出的菜单中选择 <b>“拍照”</b> 或 <b>“相机”</b>。
+                点击下方按钮，在弹出的菜单中选择 <b>“拍照”</b> 或 <b>“相机”</b>。<br>
                 这将启动你的<b>系统原生相机</b>，享受<b>全屏、高清、手动对焦</b>体验！
             </p>
         </div>
@@ -265,7 +261,7 @@ if target_image is not None:
         byte_len = len(raw_data)
         df_params = calculate_pdf417_params(byte_len)
         
-        col_summary, col_table = st.columns([1, 2])
+        col_summary, col_table_content = st.columns([1, 2]) # 更改列名
 
         with col_summary:
             st.markdown(f"**分析长度:** `{byte_len} bytes`")
@@ -276,7 +272,25 @@ if target_image is not None:
                 rec_rows = best_row.iloc[0]['推算行数 (Rows)']
                 st.success(f"💡 AAMVA 推荐: **Cols=17, Rows={rec_rows}**")
 
-        with col_table:
+        with col_table_content:
+            # 创建 Row，放置表格标题和下载按钮
+            col_header, col_button = st.columns([4, 1])
+            
+            with col_header:
+                st.markdown("##### 推算行列组合结果 (数据表)")
+
+            with col_button:
+                # 使用 st.download_button 模拟复制功能
+                csv_data = df_params.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="💾 导出 CSV",
+                    data=csv_data,
+                    file_name='pdf417_params.csv',
+                    mime='text/csv',
+                    help="点击下载表格数据为 CSV 文件，方便复制到其他地方。"
+                )
+            
+            # 显示 DataFrame
             st.dataframe(
                 df_params,
                 use_container_width=True,
