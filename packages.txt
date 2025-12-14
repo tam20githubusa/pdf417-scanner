@@ -1,5 +1,0 @@
-# packages.txt
-libgl1
-libjpeg-dev
-libpng-dev
-build-essential
