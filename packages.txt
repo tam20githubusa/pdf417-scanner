@@ -1,5 +1,5 @@
-# packages.txt 内容
-libgl1 
-libjpeg-dev 
-libpng-dev 
+# packages.txt
+libgl1
+libjpeg-dev
+libpng-dev
 build-essential
