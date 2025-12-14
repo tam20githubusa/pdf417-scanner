@@ -1,4 +1,8 @@
+# requirements.txt 内容
 streamlit
-opencv-python-headless
+opencv-python
 zxing-cpp
 numpy
+pandas
+streamlit-webrtc
+aiortc  # streamlit-webrtc 的一个重要依赖
