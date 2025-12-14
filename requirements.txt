@@ -1,8 +1,4 @@
-# requirements.txt
 streamlit
-numpy
-pandas
-opencv-python
+opencv-python-headless
 zxing-cpp
-streamlit-webrtc
-aiortc
+numpy
