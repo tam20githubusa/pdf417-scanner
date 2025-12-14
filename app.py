@@ -8,6 +8,181 @@ from PIL import Image
 
 st.set_page_config(page_title="PDF417 扫码专家", page_icon="💳", layout="wide")
 
+# 注入 CSS：强制去除边距，放大相机，优化提示框
+st.markdown("""
+    <style>
+        /* 1. 极大幅度减少页面四周的留白 */
+        .block-container {
+            padding: 1rem 0.5rem;
+        }
+        
+        /* 2. 强制网页相机组件占满 100% 宽度 */
+        div[data-testid="stCameraInput"] {
+            width: 100% !important;
+        }
+        div[data-testid="stCameraInput"] video {
+            border-radius: 12px !important;
+            width: 100% !important;
+            object-fit: cover;
+        }
+
+        /* 3. 加大 Tab 标签文字，更容易点 */
+        button[data-baseweb="tab"] div {
+            font-size: 1.1em !important;
+            padding: 1em !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==================== 1. 核心算法区 (保持不变) ====================
+
+def get_hex_dump_str(raw_bytes):
+    """生成易读的 HEX 数据视图"""
+    output = []
+    output.append(f"📦 数据长度: {len(raw_bytes)} 字节")
+    output.append("-" * 35)
+    hex_str = raw_bytes.hex().upper()
+    for i in range(0, len(hex_str), 32):
+        chunk = hex_str[i:i+32]
+        ascii_chunk = ""
+        for j in range(0, len(chunk), 2):
+            byte_val = int(chunk[j:j+2], 16)
+            ascii_chunk += chr(byte_val) if 32 <= byte_val <= 126 else "."
+        output.append(f"{chunk[:16]}... | {ascii_chunk}")
+    return "\n".join(output)
+
+def preprocess_image_candidates(img):
+    """生成图像候选项"""
+    candidates = []
+    candidates.append(("原图", img))
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
+    candidates.append(("灰度", gray))
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    enhanced = clahe.apply(gray)
+    candidates.append(("增强", enhanced))
+    kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+    sharpened = cv2.filter2D(enhanced, -1, kernel)
+    candidates.append(("锐化", sharpened))
+    _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    candidates.append(("二值", binary))
+    return candidates
+
+def try_decode(image):
+    """尝试解码"""
+    try:
+        results = zxingcpp.read_barcodes(image)
+        for result in results:
+            if result.format == zxingcpp.BarcodeFormat.PDF417:
+                return True, result
+    except Exception:
+        pass
+    return False, None
+
+def smart_scan_logic(original_img):
+    """智能扫描主逻辑"""
+    base_candidates = preprocess_image_candidates(original_img)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total_steps = len(base_candidates) * 4
+    step = 0
+    found_result = None
+
+    for mode_name, img_candidate in base_candidates:
+        transforms = [
+            ("正常", lambda x: x),
+            ("旋转90°", lambda x: cv2.rotate(x, cv2.ROTATE_90_CLOCKWISE)),
+            ("放大1.5x", lambda x: cv2.resize(x, None, fx=1.5, fy=1.5)),
+            ("缩小0.5x", lambda x: cv2.resize(x, (x.shape[1]//2, x.shape[0]//2)))
+        ]
+        for trans_name, trans_func in transforms:
+            step += 1
+            progress_bar.progress(min(step / total_steps, 0.95))
+            status_text.caption(f"正在分析: {mode_name} / {trans_name}...")
+            try:
+                processed_img = trans_func(img_candidate)
+                success, result = try_decode(processed_img)
+                if success:
+                    found_result = result
+                    status_text.success(f"✅ 识别成功! (模式: {mode_name} - {trans_name})")
+                    progress_bar.progress(1.0)
+                    break
+            except:
+                continue
+        if found_result: break
+            
+    if not found_result:
+        status_text.error("❌ 未识别。请靠近一点，确保光线充足且对焦清晰。")
+        progress_bar.empty()
+    return found_result
+
+# ==================== 2. 网页界面区 (核心修改) ====================
+
+st.title("💳 PDF417 扫码专家")
+
+# 修改了 Tab 标题，更直观
+tab1, tab2 = st.tabs(["📸 网页小窗 (快速)", "📱 全屏拍照 (高清推荐)"])
+
+target_image = None
+
+# --- Tab 1: 网页相机 ---
+with tab1:
+    st.caption("适用于光线好、条码清晰的简单场景。请横屏使用。")
+    camera_file = st.camera_input("请对准条码", label_visibility="collapsed")
+    if camera_file:
+        file_bytes = np.asarray(bytearray(camera_file.read()), dtype=np.uint8)
+        target_image = cv2.imdecode(file_bytes, 1)
+
+# --- Tab 2: 全屏拍照 (核心修改点) ---
+with tab2:
+    # 增加醒目的引导提示
+    st.markdown("""
+        <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
+            <h4 style="margin: 0; color: #2e7d32; font-size: 1.1rem;">🚀 最佳识别方案：</h4>
+            <p style="margin: 10px 0 0 0; font-size: 1rem; color: #333;">
+                点击下方按钮，在弹出的菜单中选择 <b>“拍照”</b> 或 <b>“相机”</b>。<br>
+                这将启动你的<b>系统原生相机</b>，享受<b>全屏、高清、手动对焦</b>体验！
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 使用 file_uploader，隐藏标签，使其看起来更像一个功能按钮
+    upload_file = st.file_uploader("启动全屏相机", type=["jpg", "png", "jpeg", "heic"], label_visibility="collapsed")
+    
+    if upload_file:
+        with st.spinner("正在上传高清原图并解码..."):
+            file_bytes = np.asarray(bytearray(upload_file.read()), dtype=np.uint8)
+            target_image = cv2.imdecode(file_bytes, 1)
+
+# --- 处理结果展示 ---
+if target_image is not None:
+    st.divider()
+    result = smart_scan_logic(target_image)
+    
+    if result:
+        st.success("🎉 解码成功！")
+        # 1. 文本内容
+        if result.text:
+            st.subheader("📝 文本内容")
+            st.code(result.text, language="text")
+        # 2. HEX 数据
+        with st.expander("查看底层 HEX 数据 (点击展开)", expanded=False):
+            hex_str = get_hex_dump_str(result.bytes)
+            st.code(hex_str, language="text")
+        # 3. 重开按钮
+        if st.button("🔄 扫描下一张", type="primary"):
+            st.rerun()import streamlit as st
+import cv2
+import zxingcpp
+import numpy as np
+from PIL import Image
+
+# ==================== 0. 页面配置与 CSS 样式优化 ====================
+
+st.set_page_config(page_title="PDF417 扫码专家", page_icon="💳", layout="wide")
+
 # 注入 CSS：强制去除边距，放大相机
 st.markdown("""
     <style>
