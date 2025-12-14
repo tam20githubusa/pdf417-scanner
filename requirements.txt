@@ -1,8 +1,10 @@
 # requirements.txt 内容
 streamlit
-opencv-python
-zxing-cpp
 numpy
 pandas
+
+# 复杂的图像/视频处理依赖
+opencv-python
+zxing-cpp
 streamlit-webrtc
-aiortc  # streamlit-webrtc 的一个重要依赖
+aiortc
