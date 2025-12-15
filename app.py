@@ -198,39 +198,39 @@ def parse_aamva_data(raw_bytes):
     fields_map = {
         # ID/Name Fields
         "DCS": "姓氏 (Last Name)",
-        "DDEN": "名 (First Name)",
-        "DAC": "中间名 (Middle Name)",
-        "DAD": "名字后缀 (Suffix)",
-        "DDA": "名字前缀 (Prefix)",
+        "DAC": "名 (First Name)",
+        "DAD": "中间名 (Middle Name)",
         # Date Fields (4-char codes are typically dates/status)
-        "DBD": "出生日期 (DOB)",
+        "DBB": "出生日期 (DOB)",
         "DBA": "到期日期 (Expiry Date)",
-        "DDG": "签发日期 (Issue Date)",
-        "DDB": "该版面驾照的发行日期 (REV)", # 签发人/机构
+        "DBD": "签发日期 (Issue Date)",
         # Identification/Control Fields
-        "DCD": "驾照/证件号码 (License No.)", 
+        "DAQ": "驾照/证件号码 (License No.)", 
         "DCF": "档案编号/鉴别码 (DD)",
         "DCK": "库存控制号 (ICN)",
-        "DAZ": "国籍 (Nationality)",
+        "DCG": "国籍 (Nationality)",
         # Physical/Demographic
         "DBC": "性别 (Gender Code)",
-        "DBB": "眼睛颜色 (Eye Color)",
         "DAU": "身高 (Height)",
         "DAW": "体重 (Weight)",
-        "DAY": "头发颜色 (Hair Color)",
+        "DAY": "眼睛颜色 (Eye Color)",
+        "DAZ": "头发颜色 (Hair Color)",
         # Address
         "DAG": "地址 (Street)",
         "DAI": "城市 (City)",
         "DAJ": "州/省 (State)",
         "DAK": "邮编 (ZIP)",
         # License Info
-        "DCA": "驾照级别 (CLASS)",
+        "DAQ": "驾照级别 (CLASS)",
         "DCB": "驾照限制 (REST)",
-        # Custom/State Specific (ZF*)
-        "ZFZFA": "自定义1 (ZFA)",
-        "ZFB": "自定义2 (ZFB)",
-        "ZFC": "自定义3 (ZFC)",
-        "ZFJ": "自定义号 (ZFJ)",
+        "DCD": "驾照背书 (END)",
+        "DDB": "该版面驾照的发行日期 (REV)", # 签发人/机构
+        # Donation/Veteran
+        "DDL": "服役军人",
+        "DDK": "器官捐献者",
+        # Other
+        "ZFJ": " 审计信息(Audit info)",
+        "ZFC": "安全驾驶 (SAFE DRIVER)",
     }
     
     parsed_data = {}
