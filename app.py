@@ -57,7 +57,8 @@ def get_hex_dump_str(raw_bytes):
         for j in range(0, len(chunk), 2):
             try:
                 byte_val = int(chunk[j:j+2], 16)
-                ascii_chunk += chr(byte_val) if 32 <= byte_val <= 126 else "."
+                # 使用 chr() 确保只显示可打印字符
+                ascii_chunk += chr(byte_val) if 32 <= byte_val <= 126 else "." 
             except ValueError:
                 ascii_chunk += "?" # 处理末尾不完整的字节
         output.append(f"{chunk.ljust(32)} | {ascii_chunk}")
@@ -112,7 +113,6 @@ def smart_scan_logic(original_img):
             ("正常", lambda x: x),
             ("旋转90°", lambda x: cv2.rotate(x, cv2.ROTATE_90_CLOCKWISE)),
             ("放大1.5x", lambda x: cv2.resize(x, None, fx=1.5, fy=1.5)),
-            # ("缩小0.5x", lambda x: cv2.resize(x, (x.shape[1]//2, x.shape[0]//2))) 
         ]
         
         for trans_name, trans_func in transforms:
@@ -138,7 +138,7 @@ def smart_scan_logic(original_img):
         progress_bar.empty()
     return found_result
 
-# --- 新增：PDF417 参数逆向计算 ---
+# --- PDF417 参数逆向计算 ---
 
 def calculate_pdf417_params(byte_len):
     """
@@ -181,24 +181,21 @@ def calculate_pdf417_params(byte_len):
     
     return pd.DataFrame(data)
 
-# --- 新增：AAMVA 数据解析函数 ---
+# --- AAMVA 数据解析函数 (修复版) ---
 
 def parse_aamva_data(raw_bytes):
     """
     解析 AAMVA D20 标准的原始字节数据，提取关键字段。
+    【修复：优化了 DL/ID 主数据段的定位逻辑】
     """
     try:
-        # AAMVA 使用 ASCII 或 Latin-1 编码
+        # AAMVA 通常使用 ASCII 或 Latin-1 编码
+        # 尝试解码为文本，忽略无法识别的字符
         data_str = raw_bytes.decode('latin-1', errors='ignore') 
     except Exception:
         return {"Error": "无法将数据解码为 ASCII/Latin-1 文本。"}
 
-    # 定义字段分隔符 (RS: 1E) 和记录分隔符 (LF: 0A, CR: 0D)
-    
-    # 查找主数据段 (以 DL, ID, 或 DB 开头)
-    segments = data_str.split('\x1e') 
-    
-    # 字段代码到描述的映射 (只列出关键字段和您提到的字段)
+    # 定义字段代码到描述的映射 (只列出关键字段和您提到的字段)
     fields_map = {
         "DCS": "姓氏 (Last Name)",
         "DDEN": "名 (First Name)",
@@ -213,30 +210,51 @@ def parse_aamva_data(raw_bytes):
         "DAJ": "州/省 (Jurisdiction)",
         "DCF": "国家/地区 (Country)",
         "DCK": "身高/体重 (CK)",
-        # ZFZFA - ZFK 是州自定义字段，通常用于冗余数据
+        "ZFA": "自定义1 (ZFA)",
+        "ZFB": "自定义2 (ZFB)",
+        "ZFC": "自定义3 (ZFC)",
+        "ZFD": "自定义4 (ZFD)",
+        "ZFE": "自定义5 (ZFE)",
         "ZFJ": "自定义号 (ZFJ)"
     }
     
     parsed_data = {}
     
-    # 查找主数据段
-    main_segment_found = False
+    # 1. 查找主数据段 (以 DL 或 ID 开头)
+    
+    # 使用 Record Separator (\x1e, ASCII 30) 分割所有段落
+    segments = data_str.split('\x1e') 
+    
+    main_data_content = None
+    
     for segment in segments:
-        if segment.startswith('DL') or segment.startswith('ID'):
-            main_segment_found = True
-            data_content = segment[segment.find('Z')+1:] # 从 'Z' 之后开始解析数据
-            break
+        # 查找包含 'DL' (Driver License) 或 'ID' 的段落
+        dl_start_index = segment.find('DL')
+        id_start_index = segment.find('ID')
+
+        if dl_start_index != -1 or id_start_index != -1:
+            # 找到 DL 或 ID 之后，定位到数据段末尾的 'Z' 标记
+            z_pos = segment.find('Z')
+            if z_pos != -1 and z_pos + 1 < len(segment):
+                # 实际数据内容从 Z 之后开始 (跳过索引，如 DL0100...)
+                main_data_content = segment[z_pos + 1:] 
+                break
             
-    if not main_segment_found:
-        return {"Error": "未找到 DL/ID 主数据段。"}
+    if not main_data_content:
+        # 如果 Z 后面没有内容，可能格式有变，尝试从 DL/ID 后面固定长度开始
+        # 或者直接返回错误
+        return {"Error": "未找到 DL/ID 主数据段的起始标记（Z标记缺失或数据不完整）。"}
         
-    # 解析逻辑：寻找 3 或 4 个大写字母的代码
+    # 2. 解析逻辑：从主数据段中提取字段
     current_pos = 0
+    data_content = main_data_content
+    
     while current_pos < len(data_content):
         match_found = False
         
-        # 查找下一个字段代码（3或4个大写字母）
+        # 查找下一个字段代码（3个大写字母）
         for code in fields_map.keys():
+            # 检查当前位置是否是某个字段代码的起始
             if data_content.startswith(code, current_pos):
                 field_code = code
                 field_description = fields_map[field_code]
@@ -245,6 +263,7 @@ def parse_aamva_data(raw_bytes):
                 next_field_pos = len(data_content)
                 
                 # 查找下一个字段代码的位置 (可以是任何一个已知的代码)
+                # 从当前字段代码之后开始找
                 for next_code in fields_map.keys():
                     pos = data_content.find(next_code, current_pos + len(field_code))
                     if pos != -1 and pos < next_field_pos:
@@ -286,7 +305,7 @@ with tab1:
         target_image = cv2.imdecode(file_bytes, 1)
         data_source = "网页相机"
 
-# --- Tab 2: 全屏拍照 (核心修改点) ---
+# --- Tab 2: 全屏拍照 ---
 with tab2:
     st.markdown("""
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
@@ -313,6 +332,8 @@ if target_image is not None:
     
     if result:
         st.success("🎉 解码成功！")
+        
+        # 优先使用 bytes，否则 fallback 到 text 并编码
         raw_data = result.bytes if result.bytes else result.text.encode('latin-1', errors='ignore')
         
         # 确定数据类型
@@ -321,25 +342,29 @@ if target_image is not None:
         # 1. 结果概览
         st.info(f"数据类型: **{data_type}** | 字节长度: **{len(raw_data)}** bytes")
         
-        # 2. 结构化解析 (新增区域)
-        if data_type == "二进制 (Bytes)" and len(raw_data) > 100:
+        # 2. 结构化解析
+        if len(raw_data) > 100:
             st.subheader("📋 结构化数据解析 (AAMVA)")
             parsed_data = parse_aamva_data(raw_data)
             
             if "Error" in parsed_data:
                  st.error(f"解析失败: {parsed_data['Error']}")
             else:
-                 # 使用 Pandas DataFrame 展示解析结果，更美观
+                 # 使用 Pandas DataFrame 展示解析结果
                  df_parsed = pd.DataFrame(parsed_data.items(), columns=["字段", "值"])
                  
                  # 确保许可证号和姓名放在最前面
-                 df_parsed = df_parsed.sort_values(by="字段", key=lambda x: x.map({'驾照/证件号码 (License No.)': 0, '姓氏 (Last Name)': 1}), ascending=True, ignore_index=True)
+                 def sort_key(column):
+                    order = {'驾照/证件号码 (License No.)': 0, '姓氏 (Last Name)': 1, '名 (First Name)': 2}
+                    return column.map(lambda x: order.get(x, 99))
+                     
+                 df_parsed = df_parsed.sort_values(by="字段", key=sort_key, ascending=True, ignore_index=True)
                  
                  st.dataframe(df_parsed, use_container_width=True, hide_index=True)
                  
                  # --- 演示您想要的格式 (DAQ123456 驾照/身份证号 123456) ---
                  license_no = parsed_data.get('驾照/证件号码 (License No.)', 'N/A')
-                 st.markdown(f"**快速查看:** **{license_no}** 对应 **驾照/证件号码**")
+                 st.markdown(f"**快速查看 (证件号):** **`{license_no}`** 对应 **驾照/证件号码**")
 
         # 3. HEX 数据
         with st.expander("查看底层 HEX 数据 (点击展开)", expanded=False):
