@@ -186,7 +186,7 @@ def calculate_pdf417_params(byte_len):
 def parse_aamva_data(raw_bytes):
     """
     解析 AAMVA D20 标准的原始字节数据，提取关键字段。
-    【修复：基于 Line Feed (\n) 分割记录，解决字段拼接和定位问题】
+    【最终修复：采用精准位置切片 (Slicing) 方法，基于所有字段代码的起始位置来分割数据。】
     """
     try:
         # AAMVA 通常使用 ASCII 或 Latin-1 编码
@@ -194,42 +194,48 @@ def parse_aamva_data(raw_bytes):
     except Exception:
         return {"Error": "无法将数据解码为 ASCII/Latin-1 文本。"}
 
-    # 定义字段代码到描述的映射 (包含 3/4 字符的常见代码)
-    # 注意：这里的字段代码必须与您的数据样本中的实际代码一致。
+    # 1. 定义综合字段代码映射 (更准确的 AAMVA D20 2020/2022 标准列表)
     fields_map = {
-        "DAQ": "驾照/证件号码 (License No.)", 
+        # ID/Name Fields
         "DCS": "姓氏 (Last Name)",
-        "DAC": "名 (First Name)",
-        "DAD": "中间名 (Middle Name)",
-        "DCA": "驾照级别 (CLASS)",
-        "DCB": "驾照限制 (REST)",
-        "DCD": "背书 (END)",
-        "DBD": "签发日期 (Issue Date)",
-        "DBB": "出生日期 (DOB)",
+        "DDEN": "名 (First Name)",
+        "DAC": "中间名 (Middle Name)",
+        "DAD": "名字后缀 (Suffix)",
+        "DDA": "名字前缀 (Prefix)",
+        # Date Fields (4-char codes are typically dates/status)
+        "DBD": "出生日期 (DOB)",
         "DBA": "到期日期 (Expiry Date)",
+        "DDG": "签发日期 (Issue Date)",
+        "DDB": "该版面驾照的发行日期 (REV)", # 签发人/机构
+        # Identification/Control Fields
+        "DCD": "驾照/证件号码 (License No.)", 
+        "DCF": "档案编号/鉴别码 (DD)",
+        "DCK": "库存控制号 (ICN)",
+        "DAZ": "国籍 (Nationality)",
+        # Physical/Demographic
         "DBC": "性别 (Gender Code)",
-        "DAU": "身高 (Heighth)",  
-        "DAW": "体重 (Weighth)",      
-        "DAY": "眼睛颜色 (Eye Color)",
-        "DAZ": "眼睛颜色 (Hair Color)",    
+        "DBB": "眼睛颜色 (Eye Color)",
+        "DAU": "身高 (Height)",
+        "DAW": "体重 (Weight)",
+        "DAY": "头发颜色 (Hair Color)",
+        # Address
         "DAG": "地址 (Street)",
         "DAI": "城市 (City)",
         "DAJ": "州/省 (State)",
-        "DAK": "邮编 (ZIP)", 
-        "DCF": "档案编号/鉴别码 (DD)",
-        "DCK": "库存控制号 (ICN)",
-        "DCG": "国籍 (Nationalityt)",
-        "DCG": "国籍 (Nationalityt)",
-        "DDB": "签发人 (Agency)", # 常见 3 字符代码
-        "DDA": "Real ID标识 F为Real ID， N为联邦限制 (ZFJ)",
-        "DDB": "该版面驾照的发行日期 (REV)",
-        "ZFB": "自定义B (ZFB)",
-        "ZFC": "自定义C (ZFC)",
+        "DAK": "邮编 (ZIP)",
+        # License Info
+        "DCA": "驾照级别 (CLASS)",
+        "DCB": "驾照限制 (REST)",
+        # Custom/State Specific (ZF*)
+        "ZFZFA": "自定义1 (ZFA)",
+        "ZFB": "自定义2 (ZFB)",
+        "ZFC": "自定义3 (ZFC)",
+        "ZFJ": "自定义号 (ZFJ)",
     }
     
     parsed_data = {}
     
-    # 1. 查找主数据段 (以 DL 或 ID 开头)
+    # 2. 查找主数据段 (以 DL 或 ID 开头)
     segments = data_str.split('\x1e') # 使用 Record Separator (\x1e) 分割所有段落
     main_data_content = None
     
@@ -238,45 +244,59 @@ def parse_aamva_data(raw_bytes):
         id_start_index = segment.find('ID')
 
         if dl_start_index != -1 or id_start_index != -1:
-            # 找到 DL 或 ID 之后，定位到数据段末尾的 'Z' 标记
             z_pos = segment.find('Z')
             if z_pos != -1 and z_pos + 1 < len(segment):
-                # 实际数据内容从 Z 之后开始 (跳过索引，如 DL0100...)
+                # 实际数据内容从 'Z' 之后开始 (跳过索引)
                 main_data_content = segment[z_pos + 1:] 
                 break
             
     if not main_data_content:
         return {"Error": "未找到 DL/ID 主数据段的起始标记（Z标记缺失或数据不完整）。"}
         
-    # 2. 核心修复：按 Line Feed (\n, ASCII 0A) 分割记录，并按字段代码长度提取值
+    # 3. 收集所有字段代码及其在数据流中的起始位置 (Slicing Method)
     
-    # 用回车符或换行符分割记录 (AAMVA 记录分隔符)
-    records = main_data_content.replace('\r', '\n').split('\n')
-    
-    # 确保字段代码列表按长度降序排列，以便优先匹配 4 字符代码 (如 DDEN)
+    field_positions = []
+    # 确保字段代码列表按长度降序排列，以避免短代码匹配到长代码的前缀
     sorted_codes = sorted(fields_map.keys(), key=len, reverse=True)
     
-    for record in records:
-        record = record.strip()
-        if not record: continue
-        
-        match_found = False
-        
-        for code in sorted_codes:
-            if record.startswith(code):
-                # 值是代码之后的剩余所有内容
-                value = record[len(code):].strip()
-                
-                # 匹配描述
-                description = fields_map.get(code, code)
-                
-                parsed_data[description] = value
-                match_found = True
+    for code in sorted_codes:
+        start = -1
+        while True:
+            # 查找字段代码在数据内容中的位置
+            start = main_data_content.find(code, start + 1)
+            if start == -1:
                 break
+            
+            field_positions.append({'code': code, 'start_pos': start})
+
+    if not field_positions:
+        return {"Error": "已找到主段，但未能识别任何有效的 AAMVA 字段代码。"}
+
+    # 4. 按起始位置排序
+    field_positions.sort(key=lambda x: x['start_pos'])
+
+    # 5. 提取值 (Value)
+    for i in range(len(field_positions)):
+        current = field_positions[i]
         
-        if not match_found and record:
-            # 记录无法匹配任何已知代码，可能是非标准字段或数据损坏
-            parsed_data[f"未知字段 ({record[:3]}...)"] = record
+        # 当前字段的代码长度
+        code_len = len(current['code'])
+        
+        # 当前值从当前代码的末尾开始
+        value_start = current['start_pos'] + code_len
+        
+        # 寻找下一个字段代码的起始位置作为当前值的结束
+        if i + 1 < len(field_positions):
+            value_end = field_positions[i+1]['start_pos']
+        else:
+            # 如果是最后一个字段，取到字符串末尾
+            value_end = len(main_data_content)
+        
+        # 提取值并清理分隔符
+        value = main_data_content[value_start:value_end].replace('\n', '').replace('\r', '').strip()
+        
+        description = fields_map.get(current['code'], current['code'])
+        parsed_data[description] = value
 
     if not parsed_data:
         return {"Error": "已找到主段，但未能提取任何有效字段。"}
