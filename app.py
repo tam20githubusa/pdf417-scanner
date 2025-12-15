@@ -57,8 +57,7 @@ def get_hex_dump_str(raw_bytes):
         for j in range(0, len(chunk), 2):
             try:
                 byte_val = int(chunk[j:j+2], 16)
-                # 使用 chr() 确保只显示可打印字符
-                ascii_chunk += chr(byte_val) if 32 <= byte_val <= 126 else "." 
+                ascii_chunk += chr(byte_val) if 32 <= byte_val <= 126 else "."
             except ValueError:
                 ascii_chunk += "?" # 处理末尾不完整的字节
         output.append(f"{chunk.ljust(32)} | {ascii_chunk}")
@@ -113,6 +112,8 @@ def smart_scan_logic(original_img):
             ("正常", lambda x: x),
             ("旋转90°", lambda x: cv2.rotate(x, cv2.ROTATE_90_CLOCKWISE)),
             ("放大1.5x", lambda x: cv2.resize(x, None, fx=1.5, fy=1.5)),
+            # 缩小对 PDF417 效果不好，但保留一个快速尝试
+            # ("缩小0.5x", lambda x: cv2.resize(x, (x.shape[1]//2, x.shape[0]//2))) 
         ]
         
         for trans_name, trans_func in transforms:
@@ -147,23 +148,26 @@ def calculate_pdf417_params(byte_len):
     if byte_len <= 0:
         return pd.DataFrame()
 
+    # AAMVA 标准估算逻辑 (北美驾照/ID标准)
     estimated_data_cw = math.ceil(byte_len / 1.8) 
     ecc_cw = 64  # Level 5 Security (AAMVA Standard)
     total_cw = estimated_data_cw + ecc_cw
     
     data = []
-    possible_cols = range(9, 21)
+    possible_cols = range(9, 21) # 常用列数范围
     
     for cols in possible_cols:
         rows = math.ceil(total_cw / cols)
         
-        if rows < 3 or rows > 90:
+        if rows < 3 or rows > 90: # 规范限制
             continue
             
+        # 宽高比估算 (W/H)，假设行高/模块宽度 = 3 (常见于ID卡)
         width_units = (cols + 4) * 17
         height_units = rows * 3 
         ratio = width_units / height_units
 
+        # 备注逻辑
         note = ""
         if cols == 17: note = "⭐ AAMVA 标准"
         elif 11 <= cols <= 13: note = "🔹 窄版 (NY/CA风格)"
@@ -180,93 +184,6 @@ def calculate_pdf417_params(byte_len):
         })
     
     return pd.DataFrame(data)
-
-# --- AAMVA 数据解析函数 (修复版) ---
-
-def parse_aamva_data(raw_bytes):
-    """
-    解析 AAMVA D20 标准的原始字节数据，提取关键字段。
-    【修复：基于 Line Feed (\n) 分割记录，解决字段拼接问题】
-    """
-    try:
-        data_str = raw_bytes.decode('latin-1', errors='ignore') 
-    except Exception:
-        return {"Error": "无法将数据解码为 ASCII/Latin-1 文本。"}
-
-    # 定义字段代码到描述的映射 (您的字段列表，已包含关键字段)
-    fields_map = {
-        "DCS": "姓氏 (Last Name)",
-        "DDEN": "名 (First Name)",
-        "DAC": "中间名 (Middle Name)",
-        "DDG": "签发日期 (Issue Date)",
-        "DBD": "出生日期 (DOB)",
-        "DBA": "到期日期 (Expiry Date)",
-        "DCD": "驾照/证件号码 (License No.)", # 关键字段
-        "DBC": "性别 (Gender Code)",
-        "DAU": "地址 (Street)",
-        "DAI": "城市 (City)",
-        "DAJ": "州/省 (Jurisdiction)",
-        "DCF": "国家/地区 (Country)",
-        "DCK": "身高/体重 (CK)",
-        "ZFA": "自定义1 (ZFA)",
-        "ZFB": "自定义2 (ZFB)",
-        "ZFC": "自定义3 (ZFC)",
-        "ZFD": "自定义4 (ZFD)",
-        "ZFE": "自定义5 (ZFE)",
-        "ZFJ": "自定义号 (ZFJ)"
-    }
-    
-    parsed_data = {}
-    
-    # 1. 查找主数据段 (以 DL 或 ID 开头)
-    segments = data_str.split('\x1e') # 使用 Record Separator (\x1e) 分割所有段落
-    main_data_content = None
-    
-    for segment in segments:
-        dl_start_index = segment.find('DL')
-        id_start_index = segment.find('ID')
-
-        if dl_start_index != -1 or id_start_index != -1:
-            z_pos = segment.find('Z')
-            if z_pos != -1 and z_pos + 1 < len(segment):
-                # 实际数据内容从 Z 之后开始 (跳过索引，如 DL0100...)
-                main_data_content = segment[z_pos + 1:] 
-                break
-            
-    if not main_data_content:
-        return {"Error": "未找到 DL/ID 主数据段的起始标记。"}
-        
-    # 2. 核心修复：按 Line Feed (\n, ASCII 0A) 分割记录
-    # 理论上每个记录都是 [FieldCode][Value]\n
-    records = main_data_content.split('\n')
-    
-    for record in records:
-        record = record.strip()
-        if not record: continue
-        
-        # 查找字段代码
-        match_found = False
-        for code, description in fields_map.items():
-            if record.startswith(code):
-                # 值是代码之后的剩余所有内容
-                value = record[len(code):].replace('\r', '').strip()
-                
-                # 特殊处理：如果值包含下一个字段代码，则表示解析失败或数据格式变异
-                # 但在按 \n 分割后，这种情况应大幅减少。
-                
-                # 将字段代码作为 key，而非描述，以保持一致性
-                parsed_data[description] = value
-                match_found = True
-                break
-        
-        if not match_found and record:
-            # 记录无法匹配任何已知代码，可能是噪音或非标准字段
-            pass
-            
-    if not parsed_data:
-        return {"Error": "已找到主段，但未能提取任何有效字段。"}
-            
-    return parsed_data
 
 # ==================== 2. 网页界面区 ====================
 
@@ -288,7 +205,7 @@ with tab1:
         target_image = cv2.imdecode(file_bytes, 1)
         data_source = "网页相机"
 
-# --- Tab 2: 全屏拍照 ---
+# --- Tab 2: 全屏拍照 (核心修改点) ---
 with tab2:
     st.markdown("""
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
@@ -315,7 +232,6 @@ if target_image is not None:
     
     if result:
         st.success("🎉 解码成功！")
-        
         raw_data = result.bytes if result.bytes else result.text.encode('latin-1', errors='ignore')
         
         # 确定数据类型
@@ -324,41 +240,28 @@ if target_image is not None:
         # 1. 结果概览
         st.info(f"数据类型: **{data_type}** | 字节长度: **{len(raw_data)}** bytes")
         
-        # 2. 结构化解析
-        if len(raw_data) > 100:
-            st.subheader("📋 结构化数据解析 (AAMVA)")
-            parsed_data = parse_aamva_data(raw_data)
-            
-            if "Error" in parsed_data:
-                 st.error(f"解析失败: {parsed_data['Error']}")
-            else:
-                 # 使用 Pandas DataFrame 展示解析结果
-                 df_parsed = pd.DataFrame(parsed_data.items(), columns=["字段", "值"])
-                 
-                 # 确保许可证号和姓名放在最前面
-                 def sort_key(column):
-                    order = {'驾照/证件号码 (License No.)': 0, '姓氏 (Last Name)': 1, '名 (First Name)': 2}
-                    return column.map(lambda x: order.get(x, 99))
-                     
-                 df_parsed = df_parsed.sort_values(by="字段", key=sort_key, ascending=True, ignore_index=True)
-                 
-                 st.dataframe(df_parsed, use_container_width=True, hide_index=True)
-                 
-                 # --- 快速查看 (证件号) ---
-                 license_no = parsed_data.get('驾照/证件号码 (License No.)', 'N/A')
-                 st.markdown(f"**快速查看 (证件号):** **`{license_no}`** 对应 **驾照/证件号码**")
+        # 2. 文本内容（如果存在）
+        if result.text and data_type == "文本 (Text)":
+            st.subheader("📝 文本内容")
+            st.code(result.text, language="text")
+        elif data_type == "二进制 (Bytes)":
+            st.subheader("📝 尝试解码文本 (Latin-1)")
+            try:
+                 st.code(result.bytes.decode('latin-1'), language="text")
+            except Exception:
+                 st.code("无法以 Latin-1 解码", language="text")
 
         # 3. HEX 数据
         with st.expander("查看底层 HEX 数据 (点击展开)", expanded=False):
             hex_str = get_hex_dump_str(raw_data)
             st.code(hex_str, language="text")
 
-        # 4. 参数逆向计算器 (含导出 CSV)
+        # 4. 参数逆向计算器
         st.subheader("📐 PDF417 参数逆向计算 (AAMVA)")
         byte_len = len(raw_data)
         df_params = calculate_pdf417_params(byte_len)
         
-        col_summary, col_table_content = st.columns([1, 2])
+        col_summary, col_table_content = st.columns([1, 2]) # 更改列名
 
         with col_summary:
             st.markdown(f"**分析长度:** `{byte_len} bytes`")
@@ -370,12 +273,14 @@ if target_image is not None:
                 st.success(f"💡 AAMVA 推荐: **Cols=17, Rows={rec_rows}**")
 
         with col_table_content:
+            # 创建 Row，放置表格标题和下载按钮
             col_header, col_button = st.columns([4, 1])
             
             with col_header:
                 st.markdown("##### 推算行列组合结果 (数据表)")
 
             with col_button:
+                # 使用 st.download_button 模拟复制功能
                 csv_data = df_params.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="💾 导出 CSV",
@@ -385,6 +290,7 @@ if target_image is not None:
                     help="点击下载表格数据为 CSV 文件，方便复制到其他地方。"
                 )
             
+            # 显示 DataFrame
             st.dataframe(
                 df_params,
                 use_container_width=True,
