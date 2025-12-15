@@ -198,10 +198,10 @@ def parse_aamva_data(raw_bytes):
     fields_map = {
         # ID/Name Fields
         "DCS": "姓氏 (Last Name)",
-        "DDE": "姓名截断", 
         "DAC": "名 (First Name)",
-        "DDF": "名字截断",
         "DAD": "中间名 (Middle Name)",
+        "DDE": "姓名截断", 
+        "DDF": "名字截断",
         "DDG": "中间名截断",
         # Date Fields (4-char codes are typically dates/status)
         "DBB": "出生日期 (DOB)",
