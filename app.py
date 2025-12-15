@@ -398,15 +398,7 @@ with tab2:
     st.markdown("""
 
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
-
-            <h4 style="margin: 0; color: #2e7d32; font-size: 1.1rem;">🚀 最佳识别方案：</h4>
-
-            <p style="margin: 10px 0 0 0; font-size: 1rem; color: #333;">
-
-                点击下方按钮，在弹出的菜单中选择 <b>“拍照”</b> 或 <b>“相机”</b>。<br>
-
-                这将启动你的<b>系统原生相机</b>，享受<b>全屏、高清、手动对焦</b>体验！
-
+        
             </p>
 
         </div>
