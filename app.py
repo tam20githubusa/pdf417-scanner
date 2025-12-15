@@ -186,16 +186,14 @@ def calculate_pdf417_params(byte_len):
 def parse_aamva_data(raw_bytes):
     """
     解析 AAMVA D20 标准的原始字节数据，提取关键字段。
-    【修复：优化了 DL/ID 主数据段的定位逻辑】
+    【修复：基于 Line Feed (\n) 分割记录，解决字段拼接问题】
     """
     try:
-        # AAMVA 通常使用 ASCII 或 Latin-1 编码
-        # 尝试解码为文本，忽略无法识别的字符
         data_str = raw_bytes.decode('latin-1', errors='ignore') 
     except Exception:
         return {"Error": "无法将数据解码为 ASCII/Latin-1 文本。"}
 
-    # 定义字段代码到描述的映射 (只列出关键字段和您提到的字段)
+    # 定义字段代码到描述的映射 (您的字段列表，已包含关键字段)
     fields_map = {
         "DCS": "姓氏 (Last Name)",
         "DDEN": "名 (First Name)",
@@ -221,19 +219,14 @@ def parse_aamva_data(raw_bytes):
     parsed_data = {}
     
     # 1. 查找主数据段 (以 DL 或 ID 开头)
-    
-    # 使用 Record Separator (\x1e, ASCII 30) 分割所有段落
-    segments = data_str.split('\x1e') 
-    
+    segments = data_str.split('\x1e') # 使用 Record Separator (\x1e) 分割所有段落
     main_data_content = None
     
     for segment in segments:
-        # 查找包含 'DL' (Driver License) 或 'ID' 的段落
         dl_start_index = segment.find('DL')
         id_start_index = segment.find('ID')
 
         if dl_start_index != -1 or id_start_index != -1:
-            # 找到 DL 或 ID 之后，定位到数据段末尾的 'Z' 标记
             z_pos = segment.find('Z')
             if z_pos != -1 and z_pos + 1 < len(segment):
                 # 实际数据内容从 Z 之后开始 (跳过索引，如 DL0100...)
@@ -241,47 +234,37 @@ def parse_aamva_data(raw_bytes):
                 break
             
     if not main_data_content:
-        # 如果 Z 后面没有内容，可能格式有变，尝试从 DL/ID 后面固定长度开始
-        # 或者直接返回错误
-        return {"Error": "未找到 DL/ID 主数据段的起始标记（Z标记缺失或数据不完整）。"}
+        return {"Error": "未找到 DL/ID 主数据段的起始标记。"}
         
-    # 2. 解析逻辑：从主数据段中提取字段
-    current_pos = 0
-    data_content = main_data_content
+    # 2. 核心修复：按 Line Feed (\n, ASCII 0A) 分割记录
+    # 理论上每个记录都是 [FieldCode][Value]\n
+    records = main_data_content.split('\n')
     
-    while current_pos < len(data_content):
-        match_found = False
+    for record in records:
+        record = record.strip()
+        if not record: continue
         
-        # 查找下一个字段代码（3个大写字母）
-        for code in fields_map.keys():
-            # 检查当前位置是否是某个字段代码的起始
-            if data_content.startswith(code, current_pos):
-                field_code = code
-                field_description = fields_map[field_code]
+        # 查找字段代码
+        match_found = False
+        for code, description in fields_map.items():
+            if record.startswith(code):
+                # 值是代码之后的剩余所有内容
+                value = record[len(code):].replace('\r', '').strip()
                 
-                # 寻找下一个字段代码的起始位置作为当前值的结束
-                next_field_pos = len(data_content)
+                # 特殊处理：如果值包含下一个字段代码，则表示解析失败或数据格式变异
+                # 但在按 \n 分割后，这种情况应大幅减少。
                 
-                # 查找下一个字段代码的位置 (可以是任何一个已知的代码)
-                # 从当前字段代码之后开始找
-                for next_code in fields_map.keys():
-                    pos = data_content.find(next_code, current_pos + len(field_code))
-                    if pos != -1 and pos < next_field_pos:
-                         next_field_pos = pos
-                
-                value = data_content[current_pos + len(field_code): next_field_pos]
-                
-                # 清理值中的分隔符 (\n, \r)
-                parsed_data[field_description] = value.replace('\n', '').replace('\r', '').strip()
-                current_pos = next_field_pos
+                # 将字段代码作为 key，而非描述，以保持一致性
+                parsed_data[description] = value
                 match_found = True
                 break
         
-        if not match_found:
-            current_pos += 1 # 找不到字段时跳过，避免死循环
-        
-        if current_pos >= len(data_content):
-            break
+        if not match_found and record:
+            # 记录无法匹配任何已知代码，可能是噪音或非标准字段
+            pass
+            
+    if not parsed_data:
+        return {"Error": "已找到主段，但未能提取任何有效字段。"}
             
     return parsed_data
 
@@ -333,7 +316,6 @@ if target_image is not None:
     if result:
         st.success("🎉 解码成功！")
         
-        # 优先使用 bytes，否则 fallback 到 text 并编码
         raw_data = result.bytes if result.bytes else result.text.encode('latin-1', errors='ignore')
         
         # 确定数据类型
@@ -362,7 +344,7 @@ if target_image is not None:
                  
                  st.dataframe(df_parsed, use_container_width=True, hide_index=True)
                  
-                 # --- 演示您想要的格式 (DAQ123456 驾照/身份证号 123456) ---
+                 # --- 快速查看 (证件号) ---
                  license_no = parsed_data.get('驾照/证件号码 (License No.)', 'N/A')
                  st.markdown(f"**快速查看 (证件号):** **`{license_no}`** 对应 **驾照/证件号码**")
 
