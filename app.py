@@ -212,6 +212,7 @@ def parse_aamva_data(raw_bytes):
         "DCF": "档案编号/鉴别码 (DD)",
         "DCK": "库存控制号 (ICN)",
         "DCG": "国籍 (Nationality)",
+        "DDA": "REAL ID-FULL",
         # Physical/Demographic
         "DBC": "性别 (Gender Code)",
         "DAU": "身高 (Height)",
@@ -227,13 +228,9 @@ def parse_aamva_data(raw_bytes):
         "DCA": "驾照级别 (CLASS)",
         "DCB": "驾照限制 (REST)",
         "DCD": "驾照背书 (END)",
-        "DDB": "该版面驾照的发行日期 (REV)", # 签发人/机构
         # Donation/Veteran
         "DDL": "服役军人",
         "DDK": "器官捐献者",
-        # Other
-        "ZFJ": " 审计信息(Audit info)",
-        "ZFC": "安全驾驶 (SAFE DRIVER)",
     }
     
     parsed_data = {}
