@@ -10,6 +10,7 @@ import subprocess
 
 # --- 引入外部库 ---
 try:
+    # 假设用户已安装此库，这是 PDF417 编码和图像生成的核心
     from pdf417 import encode, render_image
 except ImportError:
     st.warning("警告：PDF417 编码库 (pdf417) 未安装。条码图像功能将使用占位符。请运行 `pip install pdf417`。")
@@ -17,7 +18,7 @@ except ImportError:
     def render_image(*args, **kwargs): return Image.new('RGB', (400, 100), color='white')
 
 
-# ==================== 0. 配置与 51 州 IIN 映射 (最终版) ====================
+# ==================== 0. 配置与 51 州 IIN 映射 ====================
 
 # 州代码到 IIN 和版本信息的映射 (AAMVA V09/D20-2020 兼容)
 JURISDICTION_MAP = {
@@ -205,4 +206,196 @@ def generate_aamva_data_core(inputs):
         f"DBD{iss_date}\x0a"                       
         f"DBB{dob}\x0a"
         f"DBA{exp_date}\x0a"
-        f"DBC{sex}\
+        f"DBC{sex}\x0a"
+        f"DAU{height} IN\x0a"                      
+        f"DAY{eyes}\x0a"                           
+        f"DAG{address}\x0a"                     
+        f"DAI{city}\x0a"                           
+        f"DAJ{jurisdiction_code}\x0a"              # 动态州码
+        f"DAK{zip_code}\x0a"                       
+        f"DCF{dd_code}\x0a"                         
+        f"DCGUSA\x0a"                              
+        f"DDA{dda_code}\x0a"
+        f"DDB{rev_date}\x0a"                       
+        f"DAZ{hair}\x0a"                           
+        f"DCJ{audit_code}\x0a"                     
+        f"DCL{race}\x0a"                           # 【修正点】确保 DCL 后是 \x0a，不是空格
+    )
+    # 最后一个字段 DAW{weight}
+    subfile_dl_body += f"DAW{weight}"
+    
+    # 清理空字段的 \x0a\x0a 串，并确保 NONE 被移除
+    subfile_dl_base_cleaned = subfile_dl_body.replace("NONE\x0a", "\x0a").replace("  ", " ").replace("\x0a\x0a", "\x0a")
+    
+    # [拼接 DL 子文件]
+    subfile_dl_final = subfile_dl_base_cleaned + "\x0d" # 最终以 \x0d 终止
+
+    # --- 4. 构建 ZC 子文件 (Data 2) ---
+    subfile_zc = (
+        f"ZC"              
+        f"ZCAC"            
+    ) + "\x0d"
+
+    # --- 5. 构建头部和偏移量 ---
+    
+    # 头部前缀: @\n\x1e\rANSI + IIN + Version + JURIS_VERSION + NUM_ENTRIES
+    header_prefix = f"@\x0a\x1e\x0dANSI {iin}{aamva_version}{jurisdiction_version}{num_entries}"
+    
+    # 实际 DL/ZC 长度和偏移量计算（使用硬编码来匹配典型 324 字节 CO 结构）
+    des_dl = f"DL00410276" 
+    des_zc = f"ZC03170048" 
+    
+    # 最终头部 (使用 CO 验证的 C03170007 标识)
+    header_final = header_prefix + "C03170007"
+    
+    # 最终拼接
+    return header_final + des_dl + des_zc + subfile_dl_final + subfile_zc
+
+
+# ==================== 3. Streamlit 生成界面 UI ====================
+
+def pdf417_generator_ui():
+    st.title("💳 AAMVA PDF417 数据生成专家")
+    st.caption("基于 AAMVA D20-2020 标准，支持 51 个管辖区动态 IIN/格式生成。")
+
+    # --- 状态选择 ---
+    jurisdictions = {v['name']: k for k, v in JURISDICTION_MAP.items()}
+    sorted_names = sorted(jurisdictions.keys())
+    
+    default_state_name = JURISDICTION_MAP["CO"]['name'] # 默认科罗拉多州
+    selected_name = st.selectbox("选择目标州/管辖区 (Jurisdiction)", 
+                                 options=sorted_names,
+                                 index=sorted_names.index(default_state_name))
+    jurisdiction_code = jurisdictions[selected_name]
+    
+    st.info(f"选中的 IIN: **{JURISDICTION_MAP[jurisdiction_code]['iin']}** | 州代码: **{jurisdiction_code}**")
+
+    # --- 默认数据 ---
+    default_data = {
+        'first_name': 'LACEY', 'middle_name': 'LYNN', 'last_name': 'GOODING',
+        'address': '8444 KALAMATH ST', 'city': 'FEDERAL HEIGHTS', 'zip_input': '80260',
+        'dob': '09/23/1990', 'exp_date': '09/23/2026', 'iss_date': '04/20/2021', 'rev_date': '10302015',
+        'dl_number': '171625540', 'class_code': 'R', 'rest_code': 'C', 'end_code': 'NONE',
+        'dd_code': '6358522', 'audit_code': 'CDOR_DL_0_042121_06913', 'dda_code': 'F',
+        'sex': '2', 'height_input': '069', 'weight': '140', 'eyes': 'BLU', 'hair': 'BRO', 'race': 'W' # race 默认 W
+    }
+    
+    # 覆盖种族默认值以匹配州特定要求
+    if JURISDICTION_MAP[jurisdiction_code].get('race'):
+        default_data['race'] = JURISDICTION_MAP[jurisdiction_code]['race']
+
+    # --- 1. 身份信息 ---
+    st.subheader("👤 身份与姓名")
+    col1, col2, col3 = st.columns(3)
+    inputs = {}
+    inputs['last_name'] = col1.text_input("姓氏 (DCS)", default_data['last_name'])
+    inputs['first_name'] = col2.text_input("名 (DDEN)", default_data['first_name'])
+    inputs['middle_name'] = col3.text_input("中间名 (DAC)", default_data['middle_name'])
+    
+    # --- 2. 证件信息 ---
+    st.subheader("💳 证件信息")
+    col1, col2, col3 = st.columns(3)
+    inputs['dl_number'] = col1.text_input("驾照号码 (DAQ)", default_data['dl_number'])
+    inputs['class_code'] = col2.text_input("类型 (DCA)", default_data['class_code'])
+    inputs['dda_code'] = col3.selectbox("REAL ID (DDA)", options=['F', 'N'], index=['F', 'N'].index(default_data['dda_code']), help="F=Real ID, N=Federal Limits Apply")
+    
+    col1, col2, col3 = st.columns(3)
+    inputs['rest_code'] = col1.text_input("限制 (DCB)", default_data['rest_code'])
+    inputs['end_code'] = col2.text_input("背书 (DCD)", default_data['end_code'])
+    inputs['dd_code'] = col3.text_input("鉴别码 (DCF)", default_data['dd_code'])
+    
+    inputs['audit_code'] = st.text_input("审计信息/机构代码 (DCJ)", default_data['audit_code'])
+    inputs['jurisdiction_code'] = jurisdiction_code # 传递动态州码
+
+    # --- 3. 日期信息 ---
+    st.subheader("📅 日期 (MMDDYYYY)")
+    col1, col2, col3, col4 = st.columns(4)
+    inputs['dob'] = col1.text_input("出生日期 (DBB)", default_data['dob'], help="MMDDYYYY 格式")
+    inputs['iss_date'] = col2.text_input("签发日期 (DBD)", default_data['iss_date'])
+    inputs['exp_date'] = col3.text_input("过期日期 (DBA)", default_data['exp_date'])
+    inputs['rev_date'] = col4.text_input("版面发行日期 (DDB)", default_data['rev_date'])
+    
+    # --- 4. 地址信息 ---
+    st.subheader("🏠 地址信息")
+    col1, col2 = st.columns([3, 1])
+    inputs['address'] = col1.text_input("街道地址 (DAG)", default_data['address'])
+    inputs['city'] = col2.text_input("城市 (DAI)", default_data['city'])
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    col1.text(f"州/省 (DAJ): {jurisdiction_code}") 
+    col2.text(f"国家 (DCG): USA") 
+    inputs['zip_input'] = col3.text_input("邮编 (DAK)", default_data['zip_input'], help="输入 5 位数字，将自动补全为 9 位。")
+    
+    # --- 5. 物理特征 ---
+    st.subheader("🏋️ 物理特征")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    inputs['sex'] = col1.selectbox("性别 (DBC)", options=['1', '2', '9'], index=['1', '2', '9'].index(default_data['sex']))
+    inputs['height_input'] = col2.text_input("身高 (DAU)", default_data['height_input'], help="总英寸 (如 069) 或 feet/inches (如 509)。")
+    inputs['weight'] = col3.text_input("体重 (DAW)", default_data['weight'], help="磅 (LB)")
+    inputs['eyes'] = col4.text_input("眼睛颜色 (DAY)", default_data['eyes'])
+    inputs['hair'] = col5.text_input("头发颜色 (DAZ)", default_data['hair'])
+    inputs['race'] = st.text_input("民族/其他分类 (DCL)", default_data['race'], help=f"例如 {default_data['race']}")
+
+    st.markdown("---")
+    
+    # --- 6. 生成按钮 ---
+    if st.button("🚀 生成 PDF417 条码", type="primary"):
+        if not all([inputs['dl_number'], inputs['last_name'], inputs['dob']]):
+            st.error("请输入驾照号码、姓氏和出生日期 (DOB)。")
+            return
+
+        with st.spinner("正在生成 AAMVA 数据并编码..."):
+            try:
+                # 核心数据生成
+                aamva_data = generate_aamva_data_core(inputs)
+                
+                # 编码 PDF417 (使用 latin-1 编码)
+                aamva_bytes = aamva_data.encode('latin-1')
+                codes = encode(aamva_bytes, columns=13, security_level=5)
+                # 渲染图片
+                image = render_image(codes, scale=4, ratio=3, padding=10) 
+                
+                # 将 PIL 图像转换为字节流
+                buf = io.BytesIO()
+                image.save(buf, format="PNG")
+                png_image_bytes = buf.getvalue()
+                
+                # 警告提示：检查实际长度是否匹配硬编码的头部（324字节）
+                actual_len = len(aamva_bytes)
+                if actual_len != 324:
+                    st.warning(f"⚠️ 警告：数据总长度 ({actual_len} bytes) 与头部硬编码值 (317/324 bytes) 不匹配。某些严格解析器（如 Regula）可能会拒绝。")
+                else:
+                    st.success(f"✅ 条码数据生成成功！总字节长度：{actual_len} bytes")
+                
+                # --- 结果展示 ---
+                col_img, col_download = st.columns([1, 1])
+
+                with col_img:
+                    st.image(png_image_bytes, caption="PDF417 条码图像", use_column_width=True)
+                
+                with col_download:
+                    st.download_button(
+                        label="💾 下载原始 AAMVA 数据 (.txt)",
+                        data=aamva_bytes,
+                        file_name=f"{jurisdiction_code}_DL_RAW.txt",
+                        mime="text/plain"
+                    )
+                    st.download_button(
+                        label="🖼️ 下载条码图片 (.png)",
+                        data=png_image_bytes, 
+                        file_name=f"{jurisdiction_code}_PDF417.png",
+                        mime="image/png"
+                    )
+
+                st.markdown("---")
+                st.subheader("底层 AAMVA 数据流 (HEX/ASCII)")
+                st.code(get_hex_dump_str(aamva_bytes), language='text')
+
+            except Exception as e:
+                st.error(f"生成失败：请检查输入格式是否正确。错误详情：{e}")
+
+
+# ==================== 4. 网页主程序区 ====================
+
+if __name__ == "__main__":
+    pdf417_generator_ui()
