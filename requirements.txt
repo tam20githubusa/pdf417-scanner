@@ -1,12 +1,4 @@
-# requirements.txt - 专为 PDF417 扫码专家 (cv2/zxingcpp 版本)
-# 
-# !!! 警告: 部署到 Streamlit Cloud 可能会因为底层 C/C++ 依赖失败 !!!
-
 streamlit
-Pillow
-pandas
+opencv-python-headless
+zxing-cpp
 numpy
-
-# 核心图像处理和解码库 (依赖复杂的系统级编译)
-opencv-python
-zxingcpp
