@@ -1,4 +1,6 @@
 streamlit
-opencv-python-headless
-zxing-cpp
+Pillow
+pandas
+opencv-python
 numpy
+zxingcpp
