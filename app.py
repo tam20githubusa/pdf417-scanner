@@ -221,7 +221,7 @@ def parse_aamva_data(raw_bytes):
         "DAJ": "州/省 (State)",
         "DAK": "邮编 (ZIP)",
         # License Info
-        "DAQ": "驾照级别 (CLASS)",
+        "DCA": "驾照级别 (CLASS)",
         "DCB": "驾照限制 (REST)",
         "DCD": "驾照背书 (END)",
         "DDB": "该版面驾照的发行日期 (REV)", # 签发人/机构
