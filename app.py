@@ -197,24 +197,32 @@ def parse_aamva_data(raw_bytes):
     # 定义字段代码到描述的映射 (包含 3/4 字符的常见代码)
     # 注意：这里的字段代码必须与您的数据样本中的实际代码一致。
     fields_map = {
+        "DAQ": "驾照/证件号码 (License No.)", 
         "DCS": "姓氏 (Last Name)",
-        "DDEN": "名 (First Name)",
-        "DAC": "中间名 (Middle Name)",
-        "DDG": "签发日期 (Issue Date)",
-        "DBD": "出生日期 (DOB)",
+        "DAC": "名 (First Name)",
+        "DAD": "中间名 (Middle Name)",
+        "DCA": "驾照级别 (CLASS)",
+        "DCB": "驾照限制 (REST)",
+        "DCD": "背书 (END)",
+        "DBD": "签发日期 (Issue Date)",
+        "DBB": "出生日期 (DOB)",
         "DBA": "到期日期 (Expiry Date)",
-        "DCD": "驾照/证件号码 (License No.)", # 关键字段
         "DBC": "性别 (Gender Code)",
-        "DAU": "地址 (Street)",
+        "DAU": "身高 (Heighth)",  
+        "DAW": "体重 (Weighth)",      
+        "DAY": "眼睛颜色 (Eye Color)",
+        "DAZ": "眼睛颜色 (Hair Color)",    
+        "DAG": "地址 (Street)",
         "DAI": "城市 (City)",
-        "DAJ": "州/省 (Jurisdiction)",
-        "DCF": "国家/地区 (Country)",
-        "DCK": "身高/体重 (CK)",
-        "DDAF": "体重 (Weight)", # 常见 4 字符代码
+        "DAJ": "州/省 (State)",
+        "DAK": "邮编 (ZIP)", 
+        "DCF": "档案编号/鉴别码 (DD)",
+        "DCK": "库存控制号 (ICN)",
+        "DCG": "国籍 (Nationalityt)",
+        "DCG": "国籍 (Nationalityt)",
         "DDB": "签发人 (Agency)", # 常见 3 字符代码
-        "ZFJ": "自定义号 (ZFJ)",
-        # 增加一些常见的州自定义代码 (如果有必要)
-        "ZFZFA": "自定义A (ZFZFA)",
+        "DDA": "Real ID标识 F为Real ID， N为联邦限制 (ZFJ)",
+        "DDB": "该版面驾照的发行日期 (REV)",
         "ZFB": "自定义B (ZFB)",
         "ZFC": "自定义C (ZFC)",
     }
