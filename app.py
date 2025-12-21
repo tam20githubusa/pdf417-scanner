@@ -7,6 +7,14 @@ import pandas as pd
 import math
 from PIL import Image
 
+# ==================== 新增：引入粘贴组件库 ====================
+# 如果报错，请先运行: pip install streamlit-paste-button
+try:
+    from streamlit_paste_button import paste_image_button
+except ImportError:
+    st.error("请先安装依赖库: pip install streamlit-paste-button")
+    st.stop()
+
 # ==================== 0. 页面配置与 CSS 样式优化 ====================
 
 st.set_page_config(page_title="PDF417 扫码专家", page_icon="💳", layout="wide")
@@ -33,6 +41,11 @@ st.markdown("""
         button[data-baseweb="tab"] div {
             font-size: 1.1em !important;
             padding: 1em !important;
+        }
+        
+        /* 4. 优化粘贴按钮样式 */
+        div.stButton > button:first-child {
+            width: 100%;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -190,7 +203,7 @@ def calculate_pdf417_params(byte_len):
 st.title("💳 PDF417 扫码专家")
 
 # 使用 tabs 进行模式切换
-tab1, tab2 = st.tabs(["📸 网页小窗 (快速)", "📱 全屏拍照 (高清推荐)"])
+tab1, tab2 = st.tabs(["📸 网页小窗 (快速)", "📱 全屏拍照 / 粘贴"])
 
 target_image = None
 raw_data = None
@@ -205,21 +218,44 @@ with tab1:
         target_image = cv2.imdecode(file_bytes, 1)
         data_source = "网页相机"
 
-# --- Tab 2: 全屏拍照 (核心修改点) ---
+# --- Tab 2: 全屏拍照 / 粘贴 (核心修改点) ---
 with tab2:
     st.markdown("""
         <div style="background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-bottom: 20px;">
-            <h4 style="margin: 0; color: #2e7d32; font-size: 1.1rem;">🚀 最佳识别方案：</h4>
-            <p style="margin: 10px 0 0 0; font-size: 1rem; color: #333;">
-                点击下方按钮，在弹出的菜单中选择 <b>“拍照”</b> 或 <b>“相机”</b>。<br>
-                这将启动你的<b>系统原生相机</b>，享受<b>全屏、高清、手动对焦</b>体验！
+            <h4 style="margin: 0; color: #2e7d32; font-size: 1.1rem;">🚀 多种上传方式：</h4>
+            <p style="margin: 5px 0 0 0; font-size: 0.9rem; color: #333;">
+                1. <b>粘贴图片</b>：截图后点击“粘贴”按钮。<br>
+                2. <b>全屏拍照</b>：点击“浏览文件” -> 选择“拍照/相机”。
             </p>
         </div>
     """, unsafe_allow_html=True)
 
-    upload_file = st.file_uploader("启动全屏相机", type=["jpg", "png", "jpeg", "heic"], label_visibility="collapsed")
+    # 布局：将粘贴按钮和上传组件分开，避免拥挤
+    col_paste, col_upload = st.columns([1, 2])
     
-    if upload_file:
+    with col_paste:
+        # === 新增功能：粘贴剪贴板图片 ===
+        paste_result = paste_image_button(
+            label="📋 粘贴剪贴板图片",
+            background_color="#FF4B4B",
+            hover_background_color="#FF0000",
+            text_color="#FFFFFF",
+            errors="ignore"
+        )
+    
+    with col_upload:
+        upload_file = st.file_uploader("启动全屏相机", type=["jpg", "png", "jpeg", "heic"], label_visibility="collapsed")
+    
+    # 逻辑判断优先级：如果点击了粘贴，优先使用粘贴的图片
+    if paste_result.image_data is not None:
+        with st.spinner("正在处理剪贴板图片..."):
+            # paste_result.image_data 是 PIL Image 对象
+            pil_image = paste_result.image_data
+            # 将 PIL 转换为 OpenCV 格式 (RGB -> BGR)
+            target_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            data_source = "剪贴板粘贴"
+            
+    elif upload_file:
         with st.spinner("正在上传高清原图并解码..."):
             file_bytes = np.asarray(bytearray(upload_file.read()), dtype=np.uint8)
             target_image = cv2.imdecode(file_bytes, 1)
@@ -228,6 +264,13 @@ with tab2:
 # --- 处理结果展示 ---
 if target_image is not None:
     st.divider()
+    
+    # 显示一下当前使用的图片（可选，方便用户确认）
+    with st.expander(f"查看当前处理图片 ({data_source})", expanded=False):
+        # 转换 BGR -> RGB 以便 st.image 正确显示
+        st_display_img = cv2.cvtColor(target_image, cv2.COLOR_BGR2RGB)
+        st.image(st_display_img, use_column_width=True)
+
     result = smart_scan_logic(target_image)
     
     if result:
