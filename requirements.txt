@@ -2,3 +2,6 @@ streamlit
 opencv-python-headless
 zxing-cpp
 numpy
+pandas
+Pillow
+streamlit-paste-button
