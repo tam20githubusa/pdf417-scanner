@@ -1,7 +1,7 @@
-streamlit
+streamlit>=1.35.0
+streamlit-paste-button==0.1.2
+opencv-python-headless
+zxing-cpp
 numpy<2.0.0
 pandas
 Pillow
-opencv-python-headless
-zxing-cpp
-pdf417
